@@ -1,5 +1,7 @@
-#include "cbase.h"
+#include <Windows.h>
+#include <cstdint>
 #include "memutil.h"
+#include "cbase.h"
 
 //-----------------------------------------------------------------------------
 // Singleton accessor
@@ -14,21 +16,58 @@ IEntityFactoryDictionary *EntityFactoryDictionary()
 	return s_EntityFactory;
 }
 
-const void **get_weap_vtable(
-	const char *classname)
+const void *hook_ent_factory(
+	const char *classname,
+	const void *new_ctor)
 {
 	auto *factory = EntityFactoryDictionary()->FindFactory(classname);
 	if (factory == nullptr)
 		return nullptr;
 
-	// First vfunc is the entity constructor
-	const auto ctor = (uintptr_t)(get_vfunc(factory, 0));
+	auto **vtable = *(const void***)(factory);
+	DWORD old_protect;
+	VirtualProtect(&vtable[0], sizeof(void*), PAGE_READWRITE, &old_protect);
+	const auto *old = vtable[0];
+	vtable[0] = new_ctor;
+	VirtualProtect(&vtable[0], sizeof(void*), old_protect, &old_protect);
+	
+	return old;
+}
 
-	// Constructors get generated in one of two ways
-	const auto ctor_type = *(char*)(ctor + 0x2D) == 0xE8; // CALL
+const CGlobalVarsBase *get_globals()
+{
+	static auto *g_pGlobals = **(CGlobalVarsBase***)(sigscan(
+		"server.dll",
+		"\xA1\x00\x00\x00\x00\xF3\x0F\x5E\xC8\xF3\x0F\x10\x40\x00\xF3\x0F\x59\xC1",
+		"x????xxxxxxxx?xxxx") + 1);
 
-	const auto call_offset = ctor + (ctor_type ? 0x2E : 0x7);
-	const auto call_target = *(char**)(call_offset) + call_offset + 4;
-	// mov [esi], offset ??_7CAK47@@6BCAK47@@@
-	return *(const void***)(call_target + (ctor_type ? 0xB : 0x38));
+	return g_pGlobals;
+}
+
+void *get_weapon_owner(
+	const void *weap)
+{
+	using GetOwner_t = void*(__thiscall*)(const void *thisptr);
+	static auto GetOwner = (GetOwner_t)(sigscan(
+		"server.dll",
+		"\x8B\x89\x00\x00\x00\x00\x83\xF9\xFF\x74\x27",
+		"xx????xxxxx"));
+
+	return GetOwner(weap);
+}
+
+int get_player_flags(
+	const void *player)
+{
+	return *(int*)((char*)(player) + 0xCC);
+}
+
+float get_player_speed(
+	const void *player)
+{
+	return sqrtf(
+		*(float*)((char*)(player)+0x170) *
+		*(float*)((char*)(player)+0x170) +
+		*(float*)((char*)(player)+0x174) *
+		*(float*)((char*)(player)+0x174));
 }

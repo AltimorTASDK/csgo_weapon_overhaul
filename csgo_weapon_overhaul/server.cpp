@@ -1,114 +1,211 @@
+#include <cstdint>
 #include "cbase.h"
-#include "filesystem.h"
+#include "memutil.h"
 #include <lua.hpp>
 #include <string>
 #include <map>
-#include <regex>
-#include <algorithm>
+#include <sstream>
 
-const void **get_weap_vtable(
-	const char *classname);
+#define CS_BASE_GUN_FIRE_IDX 307
+#define JUMP_IDX 447
+#define LAND_IDX 448
+#define GET_INACCURACY_IDX 459
+#define GET_SPREAD_IDX 460
+#define UPDATE_ACCURACY_PENALTY_IDX 461
 
-struct weap_callbacks
+const void *hook_ent_factory(
+	const char *classname,
+	const void *new_ctor);
+
+const CGlobalVarsBase *get_globals();
+void *get_weapon_owner(
+	const void *weap);
+
+int get_player_flags(
+	const void *player);
+
+float get_player_speed(
+	const void *player);
+
+using ctor_t = void*(__thiscall*)(
+	void*,
+	const char*);
+
+std::map<std::string, ctor_t> old_ctors;
+
+static void __fastcall CSBaseGunFire(
+	void *thisptr)
 {
-	// GetSpread()
-	// returns spread (shotgun cone)
-	int GetSpread;
+	auto **vtable = *(void***)(thisptr);
+	auto *L = (lua_State*)(vtable[-2]);
 
-	// GetInaccuracy(base_inaccuracy)
-	// returns final inaccuracy used for shot
-	int GetInaccuracy;
-
-	// UpdateAccuracyPenalty(dt, old_inaccuracy)
-	// returns new inaccuracy
-	int UpdateAccuracyPenalty;
-
-	// Jump(old_inaccuracy)
-	// returns new inaccuracy
-	int Jump;
-
-	// Land(old_inaccuracy)
-	// returns new inaccuracy
-	int Land;
-};
-
-static std::map<const void**, weap_callbacks> callback_map;
-
-/**
- * hook_weapon(
- *	classname,
- *	GetSpread,
- *	GetInaccuracy,
- *	UpdateAccuracyPenalty,
- *	Jump,
- *	Land)
- */
-static int lua_hook_weapon(
-	lua_State *L)
-{
-	if (lua_gettop(L) != 6)
+	lua_getglobal(L, "Fire");
+	if (lua_pcall(L, 0, 0, 0) != 0)
 	{
-		Warning("Wrong number of arguments supplied to hook_weapon\n");
-		return 0;
+		Warning("%s\n", lua_tostring(L, -1));
+		return;
 	}
 
-	const auto *classname = luaL_checkstring(L, -1);
-	if (strncmp(classname, "weapon_", strlen("weapon_")) != 0)
-	{
-		Warning("%s is not a weapon entity class\n", classname);
-		return 0;
-	}
+	const auto result = lua_tonumber(L, -1);
+	lua_pop(L, 1);
 
-	const auto **vtable = get_weap_vtable(classname);
-	if (vtable == nullptr)
-	{
-		Warning("Couldn't find entity factory for %s\n", classname);
-		return 0;
-	}
+	using CSBaseGunFire_t = void(__thiscall*)(
+		void*);
 
-	weap_callbacks cb;
-	cb.GetSpread = luaL_ref(L, LUA_REGISTRYINDEX);
-	cb.GetInaccuracy = luaL_ref(L, LUA_REGISTRYINDEX);
-	cb.UpdateAccuracyPenalty = luaL_ref(L, LUA_REGISTRYINDEX);
-	cb.Jump = luaL_ref(L, LUA_REGISTRYINDEX);
-	cb.Land = luaL_ref(L, LUA_REGISTRYINDEX);
-
-	callback_map[vtable] = cb;
-
-	return 0;
+	auto **old_vtable = (void**)(vtable[-3]);
+	((CSBaseGunFire_t)(old_vtable[CS_BASE_GUN_FIRE_IDX]))(thisptr);
 }
 
-void lua_init()
+static float __fastcall GetInaccuracy(
+	void *thisptr)
 {
+	auto **vtable = *(void***)(thisptr);
+	auto *L = (lua_State*)(vtable[-2]);
+
+	auto *owner = get_weapon_owner(thisptr);
+
+	lua_getglobal(L, "GetInaccuracy");
+	lua_pushboolean(L, get_player_flags(owner) & FL_DUCKING);
+	lua_pushboolean(L, get_player_flags(owner) & FL_ONGROUND);
+	lua_pushnumber(L, get_player_speed(owner));
+	if (lua_pcall(L, 3, 1, 0) != 0)
+	{
+		Warning("%s\n", lua_tostring(L, -1));
+		return 0.F;
+	}
+
+	const auto result = lua_tonumber(L, -1);
+	lua_pop(L, 1);
+	return result;
+}
+
+static void __fastcall Jump(
+	void *thisptr,
+	const float zspeed)
+{
+	auto **vtable = *(void***)(thisptr);
+	auto *L = (lua_State*)(vtable[-2]);
+
+	lua_getglobal(L, "Jump");
+	lua_pushnumber(L, zspeed);
+	if (lua_pcall(L, 1, 0, 0) != 0)
+	{
+		Warning("%s\n", lua_tostring(L, -1));
+		return;
+	}
+}
+
+static void __fastcall Land(
+	void *thisptr,
+	const float zspeed)
+{
+	auto **vtable = *(void***)(thisptr);
+	auto *L = (lua_State*)(vtable[-2]);
+
+	lua_getglobal(L, "Land");
+	lua_pushnumber(L, zspeed);
+	if (lua_pcall(L, 1, 0, 0) != 0)
+	{
+		Warning("%s\n", lua_tostring(L, -1));
+		return;
+	}
+}
+
+static float __fastcall GetSpread(
+	void *thisptr)
+{
+	auto **vtable = *(void***)(thisptr);
+	auto *L = (lua_State*)(vtable[-2]);
+
+	lua_getglobal(L, "GetSpread");
+	if (lua_pcall(L, 0, 1, 0) != 0)
+	{
+		Warning("%s\n", lua_tostring(L, -1));
+		return 0.F;
+	}
+
+	const auto result = lua_tonumber(L, -1);
+	lua_pop(L, 1);
+	return result;
+}
+
+static void __fastcall UpdateAccuracyPenalty(
+	void *thisptr)
+{
+	auto **vtable = *(void***)(thisptr);
+	auto *L = (lua_State*)(vtable[-2]);
+
+	auto *owner = get_weapon_owner(thisptr);
+
+	lua_getglobal(L, "Update");
+	lua_pushnumber(L, get_globals()->interval_per_tick);
+	lua_pushboolean(L, get_player_flags(owner) & FL_DUCKING);
+	lua_pushboolean(L, get_player_flags(owner) & FL_ONGROUND);
+	if (lua_pcall(L, 3, 0, 0) != 0)
+	{
+		Warning("%s\n", lua_tostring(L, -1));
+		return;
+	}
+}
+
+static void __fastcall dtor_hook(
+	void *thisptr)
+{
+	auto **vtable = *(void***)(thisptr);
+	auto *L = (lua_State*)(vtable[-2]);
+	lua_close(L);
+
+	auto **old_vtable = (void**)(vtable[-3]);
+
+	delete[] &vtable[-3];
+
+	using dtor_t = void(__thiscall*)(
+		void*);
+
+	((dtor_t)(old_vtable[0]))(thisptr);
+}
+
+static void *__fastcall ctor_hook(
+	void *thisptr,
+	const void*,
+	const char *classname)
+{
+	auto *ent = old_ctors[classname](thisptr, classname);
+
 	auto *L = luaL_newstate();
 	luaL_openlibs(L);
 
-	lua_pushcfunction(L, lua_hook_weapon);
-	lua_setglobal(L, "hook_weapon");
+	std::stringstream path;
+	path << "csgo/addons/csgo_weapon_overhaul/" << classname << ".lua";
 
-	FileFindHandle_t h;
-	const auto *name = g_pFullFileSystem->FindFirst(
-		"addons/csgo_weapon_overhaul/*.lua", &h);
-
-	for (; name != nullptr; name = g_pFullFileSystem->FindNext(h))
+	if (luaL_dofile(L, path.str().c_str()) != 0)
 	{
-		if (luaL_dofile(L, name) != 0)
-		{
-			Warning("Failed to load %s: %s\n", name, lua_tostring(L, -1));
-			continue;
-		}
-
-		const std::regex regex(".*\\/(.*)\\.lua");
-		std::cmatch result;
-		std::regex_search(name, result, regex);
-
-		auto main = std::string(result[0]) + "_main";
-		std::transform(main.begin(), main.end(), main.begin(), tolower);
-
-		lua_getglobal(L, main.c_str());
-		if (lua_pcall(L, 0, 0, 0) != 0)
-			Warning("Couldn't run main function %s\n", main.c_str());
-
-		Msg("Loaded %s\n", name);
+		Warning("%s\n", lua_tostring(L, -1));
+		return ent;
 	}
+
+	vmt_hook vhook;
+	// ent is an IServerNetworkable, -0xC for CBaseEntity
+	vhook.init((char*)(ent) - 0xC, L);
+	//vhook.hook(0, dtor_hook);
+	vhook.hook(CS_BASE_GUN_FIRE_IDX, CSBaseGunFire);
+	vhook.hook(JUMP_IDX, Jump);
+	vhook.hook(LAND_IDX, Land);
+	vhook.hook(GET_INACCURACY_IDX, GetInaccuracy);
+	vhook.hook(GET_SPREAD_IDX, GetSpread);
+	vhook.hook(UPDATE_ACCURACY_PENALTY_IDX, UpdateAccuracyPenalty);
+
+	Msg("Hooked 0x%X, %s\n", ent, classname);
+
+	return ent;
+}
+
+void hook_weapons_server()
+{
+	const auto add_hook = [](const char *name)
+	{
+		old_ctors[name] = (ctor_t)(hook_ent_factory(name, ctor_hook));
+	};
+
+	add_hook("weapon_ak47");
 }

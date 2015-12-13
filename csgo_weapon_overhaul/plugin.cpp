@@ -2,13 +2,16 @@
 #include "engine/iserverplugin.h"
 #include "icvar.h"
 #include "convar.h"
+#include <Windows.h>
+#undef GetClassName
 
 #ifdef MSVC
 //normally defined in libcmt which must be excluded, lua needs this
 double _HUGE = std::numeric_limits<double>::infinity();
 #endif
 
-void lua_init();
+void hook_weapons_client();
+void hook_weapons_server();
 
 class plugin : public IServerPluginCallbacks
 {
@@ -17,22 +20,12 @@ public:
 		CreateInterfaceFn interfaceFactory,
 		CreateInterfaceFn gameServerFactory)
 	{
-		ConnectTier1Libraries(&interfaceFactory, 1);
-		ConnectTier2Libraries(&interfaceFactory, 1);
-		ConVar_Register(0);
-
-		lua_init();
-
+		hook_weapons_client();
+		hook_weapons_server();
 		return true;
 	}
 
-	virtual void Unload(void)
-	{
-		ConVar_Unregister();
-		DisconnectTier2Libraries();
-		DisconnectTier1Libraries();
-	}
-
+	virtual void Unload() {}
 	virtual void Pause() {}
 	virtual void UnPause() {}
 
@@ -106,7 +99,7 @@ public:
 		const char *pCvarValue) {}
 
 	virtual void OnEdictAllocated(
-		edict_t *edict) {}
+		edict_t *edict) {} 
 
 	virtual void OnEdictFreed(
 		const edict_t *edict) {}
