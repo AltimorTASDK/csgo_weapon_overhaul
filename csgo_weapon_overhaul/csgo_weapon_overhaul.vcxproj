@@ -73,13 +73,13 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="client.cpp" />
     <ClCompile Include="memutil_win.cpp" />
     <ClCompile Include="plugin.cpp" />
-    <ClCompile Include="server.cpp" />
-    <ClCompile Include="server_win.cpp" />
+    <ClCompile Include="shared.cpp" />
+    <ClCompile Include="gameutil_win.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="gameutil.h" />
     <ClInclude Include="memutil.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
